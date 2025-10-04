@@ -1,0 +1,45 @@
+name: DWD -> DIVERA (alle 5 Min)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # Alle 5 Minuten (UTC-Zeit)
+  workflow_dispatch:        # Manuell startbar
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # dwd_seen.json zwischen Läufen "mitnehmen" (Dedupe)
+      - name: Restore seen cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: dwd_seen.json
+          key: dwd-seen-${{ github.run_id }}
+          restore-keys: |
+            dwd-seen-
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests tzdata
+
+      - name: Run script
+        env:
+          DIVERA_ACCESSKEY: ${{ secrets.DIVERA_ACCESSKEY }}
+          DIVERA_RIC: ${{ secrets.DIVERA_RIC }}
+          WARNCELL_IDS: ${{ secrets.WARNCELL_IDS }}
+          SEVERITY_MIN: ${{ secrets.SEVERITY_MIN }}
+          EVENT_ALLOW: ${{ secrets.EVENT_ALLOW }}
+          EVENT_DENY: ${{ secrets.EVENT_DENY }}
+        run: |
+          python dwd2divera.py
