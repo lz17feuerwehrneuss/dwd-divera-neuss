@@ -1,0 +1,47 @@
+name: Pegel-Watch (Düsseldorf & Neubrück)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # alle 5 Minuten (UTC)
+  workflow_dispatch:
+
+concurrency:
+  group: pegel-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Zustandsdatei für Dedupe (Cross-Up) cachen
+      - name: Restore pegel cache
+        id: cache_pegel
+        uses: actions/cache@v4
+        with:
+          path: pegel_seen.json
+          key: pegel-seen-${{ github.run_id }}
+          restore-keys: |
+            pegel-seen-
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests
+
+      - name: Run Pegel-Watch
+        env:
+          DIVERA_ACCESSKEY_SUB: ${{ secrets.DIVERA_ACCESSKEY_SUB }}  # Untereinheit-Key (Mitteilungen)
+          WATER_RIC: "#170002"                                       # Ziel-RIC (privat)
+          # Schwellen (anpassbar)
+          DUS_THRESHOLD_CM: "710"
+          NEU_THRESHOLD_CM: "145"
+        run: |
+          python pegel_watch.py
