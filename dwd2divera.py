@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DWD → DIVERA 24/7 (Mitteilungen) – Dual-RIC & NRW-Warnlagebericht-Anhang mit Cache
+DWD → DIVERA 24/7 (Mitteilungen) – Dual-RIC & NRW-Warnlagebericht-Anhang mit Cache & Log
 
 Features:
 - RIC #170001 (Infogruppe): ALLE Warnungen
@@ -15,7 +15,8 @@ Features:
   * bevorzugt Abschnitt "Entwicklung der WETTER- und WARNLAGE"
   * sonst kompletter Lagebericht
   * optische Trennlinie
-  * NEU: Cache mit Ausgabezeit-Erkennung (nur aktualisieren, wenn sich Ausgabe ändert)
+  * Cache mit Ausgabezeit-Erkennung (nur aktualisieren, wenn sich Ausgabe ändert)
+- NEU: Log-Ausgabe, ob Warnlage-Anhang Cache-Hit oder frisch geladen
 
 Python 3.12/3.13; Abhängigkeit: requests
 """
@@ -73,7 +74,7 @@ STATE_FILE = Path(os.getenv("STATE_FILE", "dwd_seen.json"))
 HTTP_TIMEOUT_CONNECT = int(os.getenv("HTTP_TIMEOUT_CONNECT", "5"))
 HTTP_TIMEOUT_READ    = int(os.getenv("HTTP_TIMEOUT_READ", "45"))
 HTTP_RETRIES         = int(os.getenv("HTTP_RETRIES", "5"))
-HEADERS = {"User-Agent": "dwd2divera/1.4 (+github-actions; contact=admin@localhost)"}
+HEADERS = {"User-Agent": "dwd2divera/1.5 (+github-actions; contact=admin@localhost)"}
 
 # Severity-Ranking
 SEVERITY_ORDER = {"":0, "unknown":0, "minor":1, "moderate":2, "severe":3, "extreme":4}
@@ -236,7 +237,7 @@ def _fmt_dt(dt: Optional[datetime]) -> Optional[str]:
     return dt.strftime("%d.%m.%Y %H:%M") if dt else None
 
 # =======================
-# NRW – WARNLAGEBERICHT (HTML → Text) + CACHE
+# NRW – WARNLAGEBERICHT (HTML → Text) + CACHE + LOG
 # =======================
 
 def _html_to_text(segment: str) -> str:
@@ -303,6 +304,7 @@ def fetch_warnlagebericht_nrw_cached() -> Optional[str]:
     - Wenn 'Ausgegeben/Stand'-Marker identisch zum Cache ist → verwende Cache-Text
     - Sonst extrahiere erneut (Entwicklung bevorzugt, sonst Full), aktualisiere Cache
     - Falls kein Marker gefunden wird, verwende TTL-Cache per Zeitstempel + Content-Hash
+    Logt zusätzlich, ob Cache-Hit oder frischer Fetch genutzt wurde.
     """
     if not APPEND_WARNLAGE:
         return None
@@ -310,14 +312,17 @@ def fetch_warnlagebericht_nrw_cached() -> Optional[str]:
     cache = _load_warnlage_cache()
     now_ts = int(time.time())
 
-    # Wenn wir keinen HTML-Abruf machen wollen (TTL-Cache ohne Marker):
+    # TTL-Variante ohne Marker
     if cache.get("no_marker") and cache.get("saved_ts"):
         if now_ts - int(cache["saved_ts"]) < WARNLAGE_TTL_SECONDS and cache.get("text"):
+            print("[Info] Warnlagebericht: Cache-Hit (TTL, kein Issue-Marker).")
             return cache["text"]
 
     html = _get_text_with_retries(WARNLAGE_URL_NRW)
     if not html:
         # Fallback: nutze Cache, wenn vorhanden
+        if cache.get("text"):
+            print("[Warn] Warnlagebericht: Abruf fehlgeschlagen – verwende Cache.")
         return cache.get("text")
 
     issue = _extract_issue_str(html)  # z. B. "Ausgegeben: 05.10.2025, 07:30 Uhr"
@@ -325,29 +330,29 @@ def fetch_warnlagebericht_nrw_cached() -> Optional[str]:
     fulltext = _extract_full_text(html)
     chosen_text = (entwicklung or fulltext or "").strip()
     if not chosen_text:
-        # nichts extrahiert → kein Anhang
+        print("[Info] Warnlagebericht: Keine verwertbaren Textabschnitte gefunden.")
         return None
 
-    # Marker/Hash
     text_hash = hashlib.sha256(chosen_text.encode("utf-8")).hexdigest()
 
     if issue:
-        # Wenn Marker gleich → verwende Cache (auch wenn Text geringfügig anders geparst wurde)
         if cache.get("issue") == issue and cache.get("text"):
+            print(f"[Info] Warnlagebericht: Cache-Hit (Issue unverändert: {issue}).")
             return cache["text"]
         # Issue neu → Cache aktualisieren
         cache = {"issue": issue, "text": chosen_text, "hash": text_hash, "saved_ts": now_ts, "no_marker": False}
         _save_warnlage_cache(cache)
+        print(f"[Info] Warnlagebericht: Aktualisiert (neue Ausgabe erkannt: {issue}).")
         return chosen_text
     else:
         # Kein Issue-Marker gefunden → TTL-Cache über Hash
         if cache.get("no_marker") and cache.get("hash") == text_hash and cache.get("text"):
-            # gleicher Text und innerhalb TTL → Cache
             if now_ts - int(cache.get("saved_ts", 0)) < WARNLAGE_TTL_SECONDS:
+                print("[Info] Warnlagebericht: Cache-Hit (identischer Inhalt, innerhalb TTL).")
                 return cache["text"]
-        # Cache neu/aktualisieren
         cache = {"issue": None, "text": chosen_text, "hash": text_hash, "saved_ts": now_ts, "no_marker": True}
         _save_warnlage_cache(cache)
+        print("[Info] Warnlagebericht: Aktualisiert (kein Marker, neuer/aktualisierter Inhalt).")
         return chosen_text
 
 # =======================
@@ -388,10 +393,9 @@ def build_divera_payload(w: Dict[str, Any], ric: str, group_ids_env: str = "", t
     meta.append(f"Quelle: DWD · {w.get('web')}")
     parts.append("\n".join(meta))
 
-    # --- NRW-Warnlagebericht anhängen (mit Cache) ---
+    # --- NRW-Warnlagebericht anhängen (mit Cache + Log) ---
     annex = fetch_warnlagebericht_nrw_cached()
     if annex:
-        # wenn wir einen Issue-Marker im Cache haben, hängen wir ihn als Kopf voran
         cache = _load_warnlage_cache()
         label = "NRW – Entwicklung der WETTER- und WARNLAGE (DWD)"
         if cache.get("issue"):
