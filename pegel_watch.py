@@ -5,7 +5,7 @@ Pegel-Watch -> DIVERA 24/7 (Mitteilung bei Überschreitung der Hochwassermarke)
 
 - Rhein, Pegel Düsseldorf: Abruf via PEGELONLINE REST-API (Wasserstand 'W' in cm)
 - Erft, Pegel Neubrück: Abruf via Erftverband "Aktuelle Werte"-Tabelle (HTML parse)
-- Schickt eine private Mitteilung an eine RIC (default #170002), sobald ein Pegel
+- Schickt eine private Mitteilung an eine RIC (default #170001), sobald ein Pegel
   die konfigurierte Schwelle beim Anstieg ÜBERSCHREITET (Dedupe: nur beim Cross-Up).
 - Retries mit Backoff, robuste Zeitausgabe, schöne Titel/Texts.
 
@@ -260,6 +260,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
