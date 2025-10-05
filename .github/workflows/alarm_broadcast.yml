@@ -2,7 +2,7 @@ name: Alarm-Broadcast (Zentrale -> Untereinheit + Telegram)
 
 on:
   schedule:
-    - cron: "*/1 * * * *"   # alle 1 Minuten (UTC)
+    - cron: "*/2 * * * *"   # alle 2 Minuten (UTC)
   workflow_dispatch:        # manueller Start möglich
 
 # Verhindert Überlappungen, falls ein Lauf länger dauert
