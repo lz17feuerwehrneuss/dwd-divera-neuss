@@ -1,0 +1,36 @@
+name: Fire Danger Warning (täglich 07:00)
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 05:00 UTC = 07:00 MESZ
+    - cron: "0 6 * * *"   # 06:00 UTC = 07:00 MEZ
+  workflow_dispatch:
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests
+
+      - name: Run daily forecast check
+        env:
+          DIVERA_ACCESSKEY_INFO: ${{ secrets.DIVERA_ACCESSKEY_INFO }}
+          FIRE_RIC: "#170001"               # Infogruppe
+          FIRE_MODE: "daily"
+          LAT: "51.15608"
+          LON: "6.66705"
+          TMAX_C: "30"
+          RH_MIN: "30"
+          WIND_KMH: "30"
+          MODEL_PREF: "icon_d2,icon_eu,gfs"
+        run: |
+          python fire_danger_watch.py
