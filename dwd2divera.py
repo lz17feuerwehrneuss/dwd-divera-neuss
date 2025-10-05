@@ -2,16 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 DWD → DIVERA 24/7 (Mitteilungen) – Dual-RIC & NRW-Warnlagebericht-Anhang mit Cache & Log
-Sicherheits-Hardening (unverändert):
+Sicherheits-Hardening:
 - KEIN hartkodierter Accesskey: DIVERA_ACCESSKEY MUSS als Secret/ENV gesetzt sein
 - Fehlerlogs ohne Response-Body/URL (Leak-Prevention)
-Neu:
-- Schwellwerte über STUFEN 1–4 statt englischer Begriffe
-  Mapping: 1=minor, 2=moderate, 3=severe, 4=extreme
+Neu (Lesbarkeit):
+- Der NRW-Warnlage-Anhang wird mit Absätzen/Zeilenumbrüchen formatiert (p/br/hx/li/div/section/article).
+Schwellen:
+- Stufen 1–4 statt englischer severity (1=minor, 2=moderate, 3=severe, 4=extreme)
   ENV:
     SEVERITY_MIN_LEVEL   -> globale Mindeststufe (leer = kein Filter)
     RIC2_THRESHOLD_LEVEL -> Mindeststufe für Einsatzabteilung (Default 3)
-Titel: zeigt „(Stufe X)“ statt englischer Severity.
 """
 
 import os
@@ -49,7 +49,6 @@ if not WARNCELL_IDS:
     WARNCELL_IDS = ["805162024"]
 
 # --- Filter global ---
-# Neu: Level (1..4) statt englischer Severity-Strings
 SEVERITY_MIN_LEVEL = os.getenv("SEVERITY_MIN_LEVEL", "").strip()  # "", "1", "2", "3", "4"
 EVENT_ALLOW = [x.strip().lower() for x in os.getenv("EVENT_ALLOW", "").split(",") if x.strip()]
 EVENT_DENY  = [x.strip().lower() for x in os.getenv("EVENT_DENY", "").split(",") if x.strip()]
@@ -64,10 +63,9 @@ STATE_FILE = Path(os.getenv("STATE_FILE", "dwd_seen.json"))
 HTTP_TIMEOUT_CONNECT = int(os.getenv("HTTP_TIMEOUT_CONNECT", "5"))
 HTTP_TIMEOUT_READ    = int(os.getenv("HTTP_TIMEOUT_READ", "45"))
 HTTP_RETRIES         = int(os.getenv("HTTP_RETRIES", "5"))
-HEADERS = {"User-Agent": "dwd2divera/1.7 (+github-actions; contact=ops@localhost)"}
+HEADERS = {"User-Agent": "dwd2divera/1.8 (+github-actions; contact=ops@localhost)"}
 
 # Severity-Mapping
-# Quelle: DWD CAP – severity: minor/moderate/severe/extreme → 1..4
 SEVERITY_TO_LEVEL = {
     "minor":    1,
     "moderate": 2,
@@ -162,7 +160,7 @@ def fetch_dwd_warnings() -> List[Dict[str, Any]]:
             "headline": p.get("HEADLINE"),
             "event": p.get("EVENT"),
             "severity": sev_str,          # original
-            "level": sev_level,           # NEU: numerische Stufe
+            "level": sev_level,           # numerische Stufe
             "urgency": p.get("URGENCY"),
             "certainty": p.get("CERTAINTY"),
             "description": (p.get("DESCRIPTION") or "").strip(),
@@ -232,14 +230,38 @@ def _fmt_dt(dt: Optional[datetime]) -> Optional[str]:
     return dt.strftime("%d.%m.%Y %H:%M") if dt else None
 
 # =======================
-# WARNLAGEBERICHT + CACHE
+# WARNLAGEBERICHT + CACHE (mit Absätzen)
 # =======================
 
-def _html_to_text(segment: str) -> str:
-    segment = re.sub(r"<script[^>]*>.*?</script>", " ", segment, flags=re.S|re.I)
-    segment = re.sub(r"<style[^>]*>.*?</style>", " ", segment, flags=re.S|re.I)
-    text = re.sub(r"<[^>]+>", " ", segment)
-    return re.sub(r"\s+", " ", text).strip()
+def _html_blocky_to_text(segment: str) -> str:
+    """HTML → Text mit Absätzen/Zeilenumbrüchen für bessere Lesbarkeit."""
+    # erst störendes entfernen
+    s = re.sub(r"<script[^>]*>.*?</script>", " ", segment, flags=re.S|re.I)
+    s = re.sub(r"<style[^>]*>.*?</style>", " ", s, flags=re.S|re.I)
+
+    # Blockelemente → Doppel-Umbruch
+    s = re.sub(r"(?i)</?(?:p|div|section|article|ul|ol|table|thead|tbody|tfoot|tr|blockquote)[^>]*>", "\n\n", s)
+    # Überschriften → Doppel-Umbruch
+    s = re.sub(r"(?i)</?h[1-6][^>]*>", "\n\n", s)
+    # Zeilenumbrüche
+    s = re.sub(r"(?i)<br\s*/?>", "\n", s)
+    # Listenpunkte
+    s = re.sub(r"(?i)<li[^>]*>", "\n• ", s)
+    s = re.sub(r"(?i)</li>", "", s)
+
+    # Tags entfernen
+    s = re.sub(r"<[^>]+>", " ", s)
+    # \r\n normalisieren
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    # Überzählige Leerzeichen
+    s = re.sub(r"[ \t]+", " ", s)
+    # Mehrfach-Umbrüche auf max. 2 reduzieren
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    # Zeilen trimmen
+    s = "\n".join(line.strip() for line in s.split("\n"))
+    # führende/trailing Leerzeilen weg
+    s = s.strip()
+    return s
 
 def _extract_issue_str(html: str) -> Optional[str]:
     norm = re.sub(r"\s+", " ", html)
@@ -248,23 +270,27 @@ def _extract_issue_str(html: str) -> Optional[str]:
         r"(Ausgegeben|Ausgabe|Stand)\s*[:vom]*\s*\d{2}\.\d{2}\.\d{2}[, ]+\d{1,2}:\d{2}\s*Uhr",
     ]:
         m = re.search(pat, norm, flags=re.I)
-        if m: return _html_to_text(m.group(0))
+        if m:
+            # Den exakten Teil aus dem Original-HTML in gut lesbaren Text umsetzen
+            return _html_blocky_to_text(m.group(0))
     return None
 
-def _extract_entwicklung_segment(html: str) -> Optional[str]:
-    norm = re.sub(r"\s+", " ", html)
-    m_start = re.search(r"Entwicklung der\s+WETTER-?\s*und\s*WARNLAGE", norm, re.I)
-    if not m_start: return None
-    tail = norm[m_start.end():]
-    m_end = re.search(r"(?:<h[1-6][^>]*>|#\s|Weitere\s+Entwicklung|Nächste\s+Aktualisierung|</section>|</article>)", tail, re.I)
-    segment = tail[:m_end.start()] if m_end else tail
-    return _html_to_text(segment)[:1800].strip()
+def _extract_entwicklung_segment_html(html: str) -> Optional[str]:
+    """Rohes HTML des bevorzugten Abschnitts zurückgeben (nicht schon zu Text machen!)."""
+    # Suche tolerant nach dem Abschnittstitel
+    m_start = re.search(r"(?i)Entwicklung der\s+WETTER-?\s*und\s*WARNLAGE", html)
+    if not m_start:
+        return None
+    tail = html[m_start.end():]
+    m_end = re.search(r"(?i)</section>|</article>|<h[1-6][^>]*>|Weitere\s+Entwicklung|Nächste\s+Aktualisierung", tail)
+    segment_html = tail[:m_end.start()] if m_end else tail
+    return segment_html
 
-def _extract_full_text(html: str) -> Optional[str]:
+def _extract_full_text_html(html: str) -> Optional[str]:
     try:
-        m_h1 = re.search(r"<h1[^>]*>.*?WARNLAGEBERICHT.*?</h1>", html, flags=re.S|re.I)
+        m_h1 = re.search(r"(?is)<h1[^>]*>.*?WARNLAGEBERICHT.*?</h1>", html)
         tail = html[m_h1.end():] if m_h1 else html
-        return _html_to_text(tail)[:2200].strip()
+        return tail
     except Exception:
         return None
 
@@ -297,12 +323,23 @@ def fetch_warnlagebericht_nrw_cached() -> Optional[str]:
         return cache.get("text")
 
     issue = _extract_issue_str(html)
-    entwicklung = _extract_entwicklung_segment(html)
-    fulltext = _extract_full_text(html)
-    chosen_text = (entwicklung or fulltext or "").strip()
+    entwicklung_html = _extract_entwicklung_segment_html(html)
+    full_html = _extract_full_text_html(html)
+
+    # Bevorzugt: Entwicklung-Abschnitt → formatierten Text erzeugen
+    chosen_text = None
+    if entwicklung_html:
+        chosen_text = _html_blocky_to_text(entwicklung_html)
+    elif full_html:
+        chosen_text = _html_blocky_to_text(full_html)
+
     if not chosen_text:
         print("[Info] Warnlagebericht: Keine verwertbaren Textabschnitte gefunden.")
         return None
+
+    # Länge begrenzen (Sicherheitsnetz)
+    if len(chosen_text) > 2200:
+        chosen_text = chosen_text[:2200].rstrip() + " …"
 
     text_hash = hashlib.sha256(chosen_text.encode("utf-8")).hexdigest()
 
@@ -364,7 +401,6 @@ def build_divera_payload(w: Dict[str, Any], ric: str, group_ids_env: str = "", t
         if sent_loc:          meta.append(f"Gesendet: {sent_loc} Uhr")
     if w.get("urgency") or w.get("certainty"):
         meta.append(f"Dringlichkeit: {w.get('urgency')}, Sicherheit: {w.get('certainty')}")
-    # Zusatz: englischer Begriff in Klammern für Transparenz
     sev_str = w.get("severity") or "-"
     if level > 0:
         meta.append(f"Warnstufe: {level} ({sev_str})")
