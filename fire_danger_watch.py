@@ -10,7 +10,7 @@ Fire Danger Warning → DIVERA 24/7 (Infogruppe)
 AND-Logik (fest):
   Temperatur > TMAX_C
   UND relative Feuchte < RH_MIN
-  UND (Wind_Mittel > WIND_KMH ODER Böe > WIND_KMH)
+  UND (Wind_Mittel > WIND_MEAN_KMH ODER Böe > WIND_GUST_KMH)
 
 Quelle: Open-Meteo Forecast API mit Modellwahl ICON-D2 → ICON-EU → GFS.
 Variablen: temperature_2m, relative_humidity_2m, wind_speed_10m, wind_gusts_10m.
@@ -23,7 +23,7 @@ ENV (GitHub Secrets/Vars):
 
 Optionale ENV:
   LAT="51.15608" LON="6.66705"
-  TMAX_C=30 RH_MIN=30 WIND_KMH=30
+  TMAX_C=30 RH_MIN=30 WIND_MEAN_KMH=25 WIND_GUST_KMH=30
   MODEL_PREF="icon_d2,icon_eu,gfs"
   STATE_FILE="fire_seen.json"
   HTTP_RETRIES=5 HTTP_TIMEOUT_CONNECT=5 HTTP_TIMEOUT_READ=45
@@ -46,7 +46,8 @@ LON = float(os.getenv("LON", "6.66705"))
 
 TMAX_C = float(os.getenv("TMAX_C", "30"))
 RH_MIN = float(os.getenv("RH_MIN", "30"))
-WIND_KMH = float(os.getenv("WIND_KMH", "30"))
+WIND_MEAN_KMH = float(os.getenv("WIND_MEAN_KMH", "25"))
+WIND_GUST_KMH = float(os.getenv("WIND_GUST_KMH", "30"))
 
 MODEL_PREF = [m.strip() for m in os.getenv("MODEL_PREF", "icon_d2,icon_eu,gfs").split(",") if m.strip()]
 
@@ -55,7 +56,7 @@ STATE_FILE = Path(os.getenv("STATE_FILE", "fire_seen.json"))
 HTTP_RETRIES         = int(os.getenv("HTTP_RETRIES", "5"))
 HTTP_TIMEOUT_CONNECT = int(os.getenv("HTTP_TIMEOUT_CONNECT", "5"))
 HTTP_TIMEOUT_READ    = int(os.getenv("HTTP_TIMEOUT_READ", "45"))
-UA = {"User-Agent": "fire-danger-watch/1.1 (+github-actions)"}
+UA = {"User-Agent": "fire-danger-watch/1.2 (+github-actions)"}
 
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 DIVERA_API = "https://app.divera247.com/api/news"
@@ -165,8 +166,8 @@ def _first_exceed_all(tsrows: List[Dict[str,Any]]) -> Dict[str, Optional[str]]:
         rhmin = r["rh"] if rhmin is None or r["rh"] < rhmin else rhmin
         wsmax = r["ws"] if wsmax is None or r["ws"] > wsmax else wsmax
         wgmax = r["wg"] if wgmax is None or r["wg"] > wgmax else wgmax
-        # AND-Regel
-        if (r["t"] > TMAX_C) and (r["rh"] < RH_MIN) and ((r["ws"] > WIND_KMH) or (r["wg"] > WIND_KMH)):
+        # AND-Regel (mit getrennten Schwellen für Mittel & Böe)
+        if (r["t"] > TMAX_C) and (r["rh"] < RH_MIN) and ((r["ws"] > WIND_MEAN_KMH) or (r["wg"] > WIND_GUST_KMH)):
             if not hit_all:
                 hit_all = r["time"][11:16]  # HH:MM
     return {
@@ -191,7 +192,7 @@ def _fmt_daily_text(model: str, info: Dict[str,Optional[str]]) -> str:
     if info["wgmax"]: extras.append(f"Böen max: {info['wgmax']} km/h")
     if extras:
         lines.append(" | ".join(extras))
-    lines.append("Regel: Temp > Schwelle, rF < Schwelle, und (Wind_Mittel oder Böe) > Schwelle.")
+    lines.append(f"Regel: Temp>{TMAX_C:.0f}°C, rF<{RH_MIN:.0f}%, und (Wind_Mittel>{WIND_MEAN_KMH:.0f} km/h oder Böe>{WIND_GUST_KMH:.0f} km/h).")
     return "\n".join(lines)
 
 def run_daily() -> int:
@@ -234,7 +235,7 @@ def run_acute() -> int:
         print("[Warn] Ungültige 'current'-Werte.")
         return 0
 
-    ok = (t > TMAX_C) and (rh < RH_MIN) and ((ws > WIND_KMH) or (wg > WIND_KMH))
+    ok = (t > TMAX_C) and (rh < RH_MIN) and ((ws > WIND_MEAN_KMH) or (wg > WIND_GUST_KMH))
     if not ok:
         print("Acute: AND-Regel nicht erfüllt → keine Mitteilung.")
         return 0
@@ -247,8 +248,8 @@ def run_acute() -> int:
         f"Modell: {(model or 'auto').upper()}  ·  Standort: Neuss (LAT {LAT:.5f}, LON {LON:.5f})",
         f"Temp jetzt {t:.1f}°C  (> {TMAX_C:.0f}°C)",
         f"rF jetzt {rh:.0f}%   (< {RH_MIN:.0f}%)",
-        f"Wind jetzt {ws:.0f} km/h  /  Böen {wg:.0f} km/h  (> {WIND_KMH:.0f} km/h gefordert für mind. eine der beiden)",
-        "Regel: Temp > Schwelle, rF < Schwelle, und (Wind_Mittel oder Böe) > Schwelle."
+        f"Wind jetzt {ws:.0f} km/h  /  Böen {wg:.0f} km/h",
+        f"Regel erfüllt, da (Wind_Mittel>{WIND_MEAN_KMH:.0f} oder Böe>{WIND_GUST_KMH:.0f})."
     ]
     title = "🚩 Fire Danger Warning"
     text = "\n".join(parts)
