@@ -30,7 +30,8 @@ jobs:
           LON: "6.66705"
           TMAX_C: "30"
           RH_MIN: "30"
-          WIND_KMH: "30"
+          WIND_MEAN_KMH: "25"
+          WIND_GUST_KMH: "30"
           MODEL_PREF: "icon_d2,icon_eu,gfs"
         run: |
           python fire_danger_watch.py
