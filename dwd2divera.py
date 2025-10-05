@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DWD → DIVERA 24/7 (Mitteilungen) – robust:
-- Holt DWD-Warnungen (WFS/JSON) für definierte WARNCELLIDs (Default: Neuss 805162024)
-- Filter: Mindest-Warnstufe (SEVERITY) + Phänomen (EVENT)
-- Warnzeitraum (ONSET/EXPIRES/EFFECTIVE) lokalisiert (mit Zeitzonen-Fallback)
-- Retries mit Exponential-Backoff + Jitter für DWD-Abruf
-- Deduplizierung via lokaler Datei dwd_seen.json
-- DIVERA-Post via accesskey (Query) + ric
+DWD → DIVERA 24/7 (Mitteilungen) – Dual-RIC:
+- Gruppe 1 (Infogruppe, RIC #170001): alle Warnungen
+- Gruppe 2 (Einsatzabteilung, RIC #170002): nur Unwetter (SEVERITY >= severe)
+- Per-RIC-Deduplizierung: 'identifier|RIC' (rückwärtskompatibel zu alten Einträgen ohne '|')
+- Filter, Warnzeitraum, Retries/Backoff, Zeitzonen-Fallback inkl.
 
 Python 3.12/3.13; Abhängigkeiten: requests  (optional: tzdata)
 """
@@ -27,33 +25,41 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 # KONFIGURATION
 # =======================
 
-# DIVERA Accesskey (empfohlen als Env-Var)
 DIVERA_ACCESSKEY = os.getenv(
     "DIVERA_ACCESSKEY",
     "cbYfiHFy4wprKiMTzimh-B-2PeGAe2oPVu399X7zZxxqDOOkih_NyxkL6jc-qPH2"
 )
 DIVERA_API_URL = os.getenv("DIVERA_API_URL", "https://app.divera247.com/api/news")
-DIVERA_RIC = os.getenv("DIVERA_RIC", "#170001")
-DIVERA_GROUP_IDS = os.getenv("DIVERA_GROUP_IDS", "")
+
+# RICs
+RIC_INFO   = os.getenv("RIC_INFO",   "#170001")  # alle Warnungen
+RIC_EINSATZ= os.getenv("RIC_EINSATZ","#170002")  # nur Unwetter (severe+)
+
+# Optional: zusätzliche group_ids per ENV (Komma)
+DIVERA_GROUP_IDS_INFO    = os.getenv("DIVERA_GROUP_IDS_INFO", "")
+DIVERA_GROUP_IDS_EINSATZ = os.getenv("DIVERA_GROUP_IDS_EINSATZ", "")
 
 # DWD-Zielgebiet(e) – Standard Neuss
 WARNCELL_IDS = [x.strip() for x in os.getenv("WARNCELL_IDS", "805162024").split(",") if x.strip()]
 if not WARNCELL_IDS:
-    WARNCELL_IDS = ["805162024"]  # Fallback, falls Env leer ist
+    WARNCELL_IDS = ["805162024"]  # Fallback
 
-# Filter (leer = kein Filter)
+# Globale Filter (optional; leer = kein Filter)
 SEVERITY_MIN = (os.getenv("SEVERITY_MIN", "") or "").strip().lower()  # minor|moderate|severe|extreme
 EVENT_ALLOW = [x.strip().lower() for x in os.getenv("EVENT_ALLOW", "").split(",") if x.strip()]
 EVENT_DENY  = [x.strip().lower() for x in os.getenv("EVENT_DENY", "").split(",") if x.strip()]
 
+# Unwetter-Schwelle für zweite RIC (fix laut Anforderung = severe)
+SEVERITY_THRESHOLD_RIC2 = "severe"
+
 # Dedupe-Datei
 STATE_FILE = Path(os.getenv("STATE_FILE", "dwd_seen.json"))
 
-# HTTP-Parameter & Retries
+# HTTP & Retries
 HTTP_TIMEOUT_CONNECT = int(os.getenv("HTTP_TIMEOUT_CONNECT", "5"))
 HTTP_TIMEOUT_READ    = int(os.getenv("HTTP_TIMEOUT_READ", "45"))
-HTTP_RETRIES         = int(os.getenv("HTTP_RETRIES", "5"))  # inkl. Erstversuch
-HEADERS = {"User-Agent": "dwd2divera/1.0 (+github-actions; contact=admin@localhost)"}
+HTTP_RETRIES         = int(os.getenv("HTTP_RETRIES", "5"))
+HEADERS = {"User-Agent": "dwd2divera/1.1 (+github-actions; contact=admin@localhost)"}
 
 # Severity-Ranking
 SEVERITY_ORDER = {"":0, "unknown":0, "minor":1, "moderate":2, "severe":3, "extreme":4}
@@ -63,7 +69,6 @@ SEVERITY_ORDER = {"":0, "unknown":0, "minor":1, "moderate":2, "severe":3, "extre
 # =======================
 
 def _get_local_zone():
-    """Bevorzugt Europe/Berlin; fällt auf System-Lokalzeit oder UTC zurück."""
     try:
         return ZoneInfo("Europe/Berlin")
     except ZoneInfoNotFoundError:
@@ -105,14 +110,9 @@ def save_seen(seen: set) -> None:
     )
 
 def _get_json_with_retries(url: str) -> Optional[dict]:
-    """GET JSON mit Retries, Backoff und Jitter. Gibt None bei endgültigem Fehlschlag zurück."""
     for attempt in range(1, HTTP_RETRIES + 1):
         try:
-            r = requests.get(
-                url,
-                headers=HEADERS,
-                timeout=(HTTP_TIMEOUT_CONNECT, HTTP_TIMEOUT_READ)
-            )
+            r = requests.get(url, headers=HEADERS, timeout=(HTTP_TIMEOUT_CONNECT, HTTP_TIMEOUT_READ))
             r.raise_for_status()
             return r.json()
         except Exception as e:
@@ -124,7 +124,6 @@ def _get_json_with_retries(url: str) -> Optional[dict]:
             time.sleep(sleep_s)
 
 def _parse_dt_any(s: Optional[str]) -> Optional[datetime]:
-    """ISO-Zeit robust parsen (Z/Offset/ohne TZ→UTC) und in lokale TZ konvertieren."""
     if not s:
         return None
     try:
@@ -142,7 +141,6 @@ def _fmt_dt(dt: Optional[datetime]) -> Optional[str]:
     return dt.strftime("%d.%m.%Y %H:%M") if dt else None
 
 def fetch_dwd_warnings() -> List[Dict[str, Any]]:
-    """DWD-Warnungen per WFS (JSON) abrufen und in ein handliches Dict-Format bringen."""
     url = build_dwd_wfs_url(WARNCELL_IDS)
     data = _get_json_with_retries(url)
     if data is None:
@@ -172,7 +170,8 @@ def fetch_dwd_warnings() -> List[Dict[str, Any]]:
         })
     return warnings
 
-def passes_filters(w: Dict[str, Any]) -> bool:
+def passes_filters_global(w: Dict[str, Any]) -> bool:
+    # Globale (frei konfigurierbare) Filter, falls gesetzt
     if SEVERITY_MIN:
         sev = w.get("severity") or ""
         if SEVERITY_ORDER.get(sev, 0) < SEVERITY_ORDER.get(SEVERITY_MIN, 0):
@@ -187,7 +186,11 @@ def passes_filters(w: Dict[str, Any]) -> bool:
             return False
     return True
 
-def build_divera_payload(w: Dict[str, Any]) -> Dict[str, Any]:
+def is_unwetter_for_ric2(w: Dict[str, Any]) -> bool:
+    sev = w.get("severity") or ""
+    return SEVERITY_ORDER.get(sev, 0) >= SEVERITY_ORDER.get(SEVERITY_THRESHOLD_RIC2, 3)  # 3 = severe
+
+def build_divera_payload(w: Dict[str, Any], ric: str, group_ids_env: str = "") -> Dict[str, Any]:
     title = f"DWD-Warnung: {w.get('event') or 'Ereignis'} ({w.get('severity') or '-'})"
 
     # Zeitfenster
@@ -230,15 +233,14 @@ def build_divera_payload(w: Dict[str, Any]) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "title": title[:120],
         "text": "\n\n".join(parts)[:8000],
+        "ric": ric
     }
 
-    # Zielgruppe
-    if DIVERA_GROUP_IDS.strip():
+    if group_ids_env.strip():
         try:
-            payload["group_ids"] = [int(x) for x in DIVERA_GROUP_IDS.split(",") if x.strip()]
+            payload["group_ids"] = [int(x) for x in group_ids_env.split(",") if x.strip()]
         except ValueError:
             pass
-    payload["ric"] = DIVERA_RIC
 
     return payload
 
@@ -260,31 +262,48 @@ def post_to_divera(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": r.status_code}
 
 # =======================
-# MAIN
+# MAIN (Dual-RIC Versand)
 # =======================
 
 def main() -> None:
     seen = load_seen()
     new_seen = set(seen)
 
-    warnings = fetch_dwd_warnings()  # [] bei DWD-Ausfall
+    warnings = fetch_dwd_warnings()
     sent_count = 0
 
     for w in warnings:
-        if not passes_filters(w):
+        if not passes_filters_global(w):
             continue
 
+        # robuster Identifier (Fallback, falls DWD IDENTIFIER fehlt)
         ident = w.get("identifier") or f"{w.get('headline')}|{w.get('sent')}|{w.get('warncellid')}"
-        if ident in seen:
-            continue
 
-        payload = build_divera_payload(w)
-        try:
-            post_to_divera(payload)
-            new_seen.add(ident)
-            sent_count += 1
-        except Exception as e:
-            print(f"[Fehler] DIVERA-Post: {e}")
+        # -- 1) Infogruppe: immer --
+        key_info = f"{ident}|{RIC_INFO}"
+        already_info = (key_info in seen) or (ident in seen)  # ident (alt) = schon an Infogruppe gesendet
+        if not already_info:
+            payload_info = build_divera_payload(w, RIC_INFO, DIVERA_GROUP_IDS_INFO)
+            try:
+                post_to_divera(payload_info)
+                new_seen.add(key_info)
+                sent_count += 1
+            except Exception as e:
+                print(f"[Fehler] DIVERA-Post (Infogruppe): {e}")
+
+        # -- 2) Einsatzabteilung: nur Unwetter (severe+) --
+        if is_unwetter_for_ric2(w):
+            key_einsatz = f"{ident}|{RIC_EINSATZ}"
+            already_einsatz = (key_einsatz in seen)
+            # WICHTIG: Ein alter Eintrag 'ident' (ohne '|') blockiert NICHT die Einsatzabteilung
+            if not already_einsatz:
+                payload_einsatz = build_divera_payload(w, RIC_EINSATZ, DIVERA_GROUP_IDS_EINSATZ)
+                try:
+                    post_to_divera(payload_einsatz)
+                    new_seen.add(key_einsatz)
+                    sent_count += 1
+                except Exception as e:
+                    print(f"[Fehler] DIVERA-Post (Einsatzabteilung): {e}")
 
     save_seen(new_seen)
     print(f"Neue Mitteilungen gesendet: {sent_count}")
