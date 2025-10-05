@@ -39,9 +39,9 @@ jobs:
       - name: Run Pegel-Watch
         env:
           DIVERA_ACCESSKEY_SUB: ${{ secrets.DIVERA_ACCESSKEY_SUB }}  # Untereinheit-Key (Mitteilungen)
-          WATER_RIC: "#170002"                                       # Ziel-RIC (privat)
+          WATER_RIC: "#170001"                                       # Ziel-RIC (privat)
           # Schwellen (anpassbar)
-          DUS_THRESHOLD_CM: "200"
-          NEU_THRESHOLD_CM: "80"
+          DUS_THRESHOLD_CM: "710"
+          NEU_THRESHOLD_CM: "145"
         run: |
           python pegel_watch.py
