@@ -35,8 +35,8 @@ from datetime import datetime, timezone
 DIVERA_ACCESSKEY_SUB = os.getenv("DIVERA_ACCESSKEY_SUB", "").strip()
 WATER_RIC = os.getenv("WATER_RIC", "#170002").strip()
 
-DUS_THRESHOLD_CM = int(os.getenv("DUS_THRESHOLD_CM", "200"))   # Rhein Düsseldorf Marke I
-NEU_THRESHOLD_CM = int(os.getenv("NEU_THRESHOLD_CM", "80"))   # Erft Neubrück EV-Einsatzplan
+DUS_THRESHOLD_CM = int(os.getenv("DUS_THRESHOLD_CM", "210"))   # Rhein Düsseldorf Marke I
+NEU_THRESHOLD_CM = int(os.getenv("NEU_THRESHOLD_CM", "85"))   # Erft Neubrück EV-Einsatzplan
 
 HTTP_RETRIES         = int(os.getenv("HTTP_RETRIES", "5"))
 HTTP_TIMEOUT_CONNECT = int(os.getenv("HTTP_TIMEOUT_CONNECT", "5"))
@@ -260,4 +260,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
