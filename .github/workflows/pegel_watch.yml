@@ -2,7 +2,7 @@ name: Pegel-Watch (Düsseldorf & Neubrück)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # alle 5 Minuten (UTC)
+    - cron: "*/15 * * * *"   # alle 15 Minuten (UTC)
   workflow_dispatch:
 
 concurrency:
