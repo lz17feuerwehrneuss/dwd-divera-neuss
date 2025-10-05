@@ -63,17 +63,18 @@ def _jget(url: str, params: Dict[str,Any], retries=HTTP_RETRIES) -> Optional[Dic
 def _jpost(url: str, params: Dict[str,Any], body: Dict[str,Any], retries=HTTP_RETRIES) -> bool:
     for attempt in range(1, retries+1):
         try:
-            r = requests.post(url, params=params, json=body, headers={**UA, "Accept":"application/json","Content-Type":"application/json"},
+            r = requests.post(url, params=params, json=body,
+                              headers={**UA, "Accept":"application/json","Content-Type":"application/json"},
                               timeout=(HTTP_TIMEOUT_CONNECT, HTTP_TIMEOUT_READ))
             if r.status_code >= 300:
-                raise RuntimeError(f"HTTP {r.status_code}: {r.text[:400]}")
+                raise RuntimeError(f"HTTP {r.status_code}")  # Body nicht loggen
             return True
         except Exception as e:
             if attempt == retries:
-                print(f"[Warn] POST {url} failed after {retries} tries: {e}")
+                print(f"[Warn] POST failed after {retries} tries: {type(e).__name__}")
                 return False
             sleep_s = (2 ** (attempt - 1)) + random.uniform(0,0.5)
-            print(f"[Info] POST retry {attempt} in {sleep_s:.1f}s … ({e})")
+            print(f"[Info] POST retry {attempt} in {sleep_s:.1f}s … ({type(e).__name__})")
             time.sleep(sleep_s)
 
 def _load_seen() -> set:
@@ -177,14 +178,14 @@ def send_telegram(bot_token: str, chat_id: str, fields: Dict[str,str]) -> bool:
         try:
             r = requests.post(url, json=body, headers=UA, timeout=(HTTP_TIMEOUT_CONNECT, HTTP_TIMEOUT_READ))
             if r.status_code >= 300:
-                raise RuntimeError(f"HTTP {r.status_code}: {r.text[:400]}")
+                raise RuntimeError(f"HTTP {r.status_code}")  # Body/URL nicht loggen
             return True
         except Exception as e:
             if attempt == HTTP_RETRIES:
-                print(f"[Warn] Telegram send failed after {HTTP_RETRIES} tries: {e}")
+                print(f"[Warn] Telegram send failed after {HTTP_RETRIES} tries: {type(e).__name__}")
                 return False
             sleep_s = (2 ** (attempt - 1)) + random.uniform(0, 0.5)
-            print(f"[Info] Telegram retry {attempt} in {sleep_s:.1f}s … ({e})")
+            print(f"[Info] Telegram retry {attempt} in {sleep_s:.1f}s … ({type(e).__name__})")
             time.sleep(sleep_s)
 
 def main():
@@ -235,3 +236,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
