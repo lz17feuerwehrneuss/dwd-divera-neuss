@@ -91,14 +91,15 @@ def _post_divera(payload: Dict[str,Any]) -> bool:
                               headers={**UA, "Accept":"application/json", "Content-Type":"application/json"},
                               timeout=(HTTP_TIMEOUT_CONNECT, HTTP_TIMEOUT_READ))
             if r.status_code >= 300:
-                raise RuntimeError(f"HTTP {r.status_code}: {r.text[:400]}")
+                # Body NICHT loggen (Token-Leak vermeiden)
+                raise RuntimeError(f"HTTP {r.status_code}")
             return True
         except Exception as e:
             if attempt == HTTP_RETRIES:
-                print(f"[Warn] DIVERA send failed after {HTTP_RETRIES} tries: {e}")
+                print(f"[Warn] DIVERA send failed after {HTTP_RETRIES} tries: {type(e).__name__}")
                 return False
             wait = (2**(attempt-1)) + random.uniform(0,0.5)
-            print(f"[Info] DIVERA retry {attempt} in {wait:.1f}s … ({e})")
+            print(f"[Info] DIVERA retry {attempt} in {wait:.1f}s … ({type(e).__name__})")
             time.sleep(wait)
 
 # ---------- Utils ----------
@@ -260,6 +261,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
