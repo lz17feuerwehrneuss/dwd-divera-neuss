@@ -1,0 +1,17 @@
+# Runtime state/cache
+*.log
+*.csv
+*.tmp
+*_seen.json
+*seen.json
+warnlage_cache.json
+fire_seen.json
+dwd_seen.json
+pegel_seen.json
+seen_alarms.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
