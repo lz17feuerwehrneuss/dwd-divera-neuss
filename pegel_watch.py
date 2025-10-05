@@ -11,7 +11,7 @@ Pegel-Watch -> DIVERA 24/7 (Mitteilung bei Überschreitung der Hochwassermarke)
 
 ENV (Actions Secrets empfohlen):
   DIVERA_ACCESSKEY_SUB   # Mitteilungen erstellen (dein Untereinheit-Key)
-  WATER_RIC              # Ziel-RIC (default "#170002")
+  WATER_RIC              # Ziel-RIC (default "#170001")
   TG_*                   # (optional) könnte ergänzt werden, falls du auch TG willst
 
 Optionale ENV:
@@ -35,8 +35,8 @@ from datetime import datetime, timezone
 DIVERA_ACCESSKEY_SUB = os.getenv("DIVERA_ACCESSKEY_SUB", "").strip()
 WATER_RIC = os.getenv("WATER_RIC", "#170002").strip()
 
-DUS_THRESHOLD_CM = int(os.getenv("DUS_THRESHOLD_CM", "200"))   # Rhein Düsseldorf Marke I
-NEU_THRESHOLD_CM = int(os.getenv("NEU_THRESHOLD_CM", "80"))   # Erft Neubrück EV-Einsatzplan
+DUS_THRESHOLD_CM = int(os.getenv("DUS_THRESHOLD_CM", "710"))   # Rhein Düsseldorf Marke I
+NEU_THRESHOLD_CM = int(os.getenv("NEU_THRESHOLD_CM", "145"))   # Erft Neubrück EV-Einsatzplan
 
 HTTP_RETRIES         = int(os.getenv("HTTP_RETRIES", "5"))
 HTTP_TIMEOUT_CONNECT = int(os.getenv("HTTP_TIMEOUT_CONNECT", "5"))
@@ -224,7 +224,7 @@ def main():
         above_old = bool(state.get("dus_above", False))
         above_new = dus_cm >= DUS_THRESHOLD_CM
         if above_new and not above_old:
-            title = f"⚠️ Hochwassermarke überschritten: Rhein – Pegel Düsseldorf"
+            title = f"⚠️ HWM überschritten: Rhein – Pegel Düsseldorf"
             lines = [
                 f"Aktueller Wasserstand: {dus_cm} cm (Marke I: {DUS_THRESHOLD_CM} cm)",
             ]
@@ -243,7 +243,7 @@ def main():
         above_old = bool(state.get("neu_above", False))
         above_new = neu_cm >= NEU_THRESHOLD_CM
         if above_new and not above_old:
-            title = f"⚠️ Hochwassermarke überschritten: Erft – Pegel Neubrück"
+            title = f"⚠️ HWM überschritten: Erft – Pegel Neubrück"
             lines = [
                 f"Aktueller Wasserstand: {neu_cm} cm (EV-Einsatzplan: {NEU_THRESHOLD_CM} cm)",
             ]
@@ -260,6 +260,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
