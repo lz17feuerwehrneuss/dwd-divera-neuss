@@ -1,0 +1,47 @@
+name: Fire Danger Warning (akut)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"  # alle 5 Minuten
+  workflow_dispatch:
+
+concurrency:
+  group: fire-acute
+  cancel-in-progress: false
+
+jobs:
+  acute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore state (dedupe per Stunde)
+        uses: actions/cache@v4
+        with:
+          path: fire_seen.json
+          key: fire-seen-${{ github.run_id }}
+          restore-keys: |
+            fire-seen-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests
+
+      - name: Run acute check
+        env:
+          DIVERA_ACCESSKEY_INFO: ${{ secrets.DIVERA_ACCESSKEY_INFO }}
+          FIRE_RIC: "#170001"               # Infogruppe
+          FIRE_MODE: "acute"
+          LAT: "51.15608"
+          LON: "6.66705"
+          TMAX_C: "30"
+          RH_MIN: "30"
+          WIND_KMH: "30"
+          MODEL_PREF: "icon_d2,icon_eu,gfs"
+        run: |
+          python fire_danger_watch.py
