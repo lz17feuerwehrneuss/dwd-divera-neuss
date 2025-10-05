@@ -2,7 +2,7 @@ name: Fire Danger Warning (akut)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # alle 5 Minuten
+    - cron: "*/15 * * * *"  # alle 15 Minuten
   workflow_dispatch:
 
 concurrency:
