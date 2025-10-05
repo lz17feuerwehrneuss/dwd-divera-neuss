@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 
 # ---------- Konfig & Defaults ----------
 DIVERA_ACCESSKEY_SUB = os.getenv("DIVERA_ACCESSKEY_SUB", "").strip()
-WATER_RIC = os.getenv("WATER_RIC", "#170002").strip()
+WATER_RIC = os.getenv("WATER_RIC", "#170001").strip()
 
 DUS_THRESHOLD_CM = int(os.getenv("DUS_THRESHOLD_CM", "710"))   # Rhein Düsseldorf Marke I
 NEU_THRESHOLD_CM = int(os.getenv("NEU_THRESHOLD_CM", "145"))   # Erft Neubrück EV-Einsatzplan
@@ -261,6 +261,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
