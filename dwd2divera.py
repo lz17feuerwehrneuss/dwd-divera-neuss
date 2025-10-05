@@ -2,9 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 DWD → DIVERA 24/7 (Mitteilungen) – Dual-RIC & NRW-Warnlagebericht-Anhang mit Cache & Log
-Sicherheits-Hardening:
-- KEIN hartkodierter Accesskey mehr (DIVERA_ACCESSKEY MUSS per ENV/Secret gesetzt sein)
-- Fehlerlogs ohne Response-Body (Token-Leak Prevention)
+Sicherheits-Hardening (unverändert):
+- KEIN hartkodierter Accesskey: DIVERA_ACCESSKEY MUSS als Secret/ENV gesetzt sein
+- Fehlerlogs ohne Response-Body/URL (Leak-Prevention)
+Neu:
+- Schwellwerte über STUFEN 1–4 statt englischer Begriffe
+  Mapping: 1=minor, 2=moderate, 3=severe, 4=extreme
+  ENV:
+    SEVERITY_MIN_LEVEL   -> globale Mindeststufe (leer = kein Filter)
+    RIC2_THRESHOLD_LEVEL -> Mindeststufe für Einsatzabteilung (Default 3)
+Titel: zeigt „(Stufe X)“ statt englischer Severity.
 """
 
 import os
@@ -14,7 +21,7 @@ import time
 import random
 import hashlib
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 
 import requests
 from datetime import datetime
@@ -30,7 +37,7 @@ DIVERA_API_URL = os.getenv("DIVERA_API_URL", "https://app.divera247.com/api/news
 
 # RICs
 RIC_INFO    = os.getenv("RIC_INFO",   "#170001").strip()  # Infogruppe: alle Warnungen
-RIC_EINSATZ = os.getenv("RIC_EINSATZ","#170002").strip()  # Einsatzabteilung: Unwetter (severe+)
+RIC_EINSATZ = os.getenv("RIC_EINSATZ","#170002").strip()  # Einsatzabteilung: ab Schwellstufe
 
 # Optional: zusätzliche group_ids per ENV (Komma)
 DIVERA_GROUP_IDS_INFO    = os.getenv("DIVERA_GROUP_IDS_INFO", "").strip()
@@ -41,13 +48,14 @@ WARNCELL_IDS = [x.strip() for x in os.getenv("WARNCELL_IDS", "805162024").split(
 if not WARNCELL_IDS:
     WARNCELL_IDS = ["805162024"]
 
-# --- Filter global (leer = kein Filter) ---
-SEVERITY_MIN = (os.getenv("SEVERITY_MIN", "") or "").strip().lower()  # minor|moderate|severe|extreme
+# --- Filter global ---
+# Neu: Level (1..4) statt englischer Severity-Strings
+SEVERITY_MIN_LEVEL = os.getenv("SEVERITY_MIN_LEVEL", "").strip()  # "", "1", "2", "3", "4"
 EVENT_ALLOW = [x.strip().lower() for x in os.getenv("EVENT_ALLOW", "").split(",") if x.strip()]
 EVENT_DENY  = [x.strip().lower() for x in os.getenv("EVENT_DENY", "").split(",") if x.strip()]
 
-# Unwetter-Schwelle für die Einsatzabteilung
-SEVERITY_THRESHOLD_RIC2 = os.getenv("SEVERITY_THRESHOLD_RIC2", "severe").strip().lower()
+# Unwetter-Schwelle für die Einsatzabteilung → Level (Default 3=severe)
+RIC2_THRESHOLD_LEVEL = int(os.getenv("RIC2_THRESHOLD_LEVEL", "3"))
 
 # Dedupe-Datei
 STATE_FILE = Path(os.getenv("STATE_FILE", "dwd_seen.json"))
@@ -56,10 +64,17 @@ STATE_FILE = Path(os.getenv("STATE_FILE", "dwd_seen.json"))
 HTTP_TIMEOUT_CONNECT = int(os.getenv("HTTP_TIMEOUT_CONNECT", "5"))
 HTTP_TIMEOUT_READ    = int(os.getenv("HTTP_TIMEOUT_READ", "45"))
 HTTP_RETRIES         = int(os.getenv("HTTP_RETRIES", "5"))
-HEADERS = {"User-Agent": "dwd2divera/1.6 (+github-actions; contact=ops@localhost)"}
+HEADERS = {"User-Agent": "dwd2divera/1.7 (+github-actions; contact=ops@localhost)"}
 
-# Severity-Ranking
-SEVERITY_ORDER = {"":0, "unknown":0, "minor":1, "moderate":2, "severe":3, "extreme":4}
+# Severity-Mapping
+# Quelle: DWD CAP – severity: minor/moderate/severe/extreme → 1..4
+SEVERITY_TO_LEVEL = {
+    "minor":    1,
+    "moderate": 2,
+    "severe":   3,
+    "extreme":  4,
+}
+LEVEL_TO_SEVERITY = {v: k for k, v in SEVERITY_TO_LEVEL.items()}
 
 # --- NRW Warnlagebericht-Append ---
 APPEND_WARNLAGE = (os.getenv("APPEND_WARNLAGE", "true").lower() in ("1","true","yes","on"))
@@ -140,11 +155,14 @@ def fetch_dwd_warnings() -> List[Dict[str, Any]]:
     for f in data.get("features", []):
         p = f.get("properties") or {}
         if not p: continue
+        sev_str = (p.get("SEVERITY") or "").lower().strip()
+        sev_level = SEVERITY_TO_LEVEL.get(sev_str, 0)
         out.append({
             "identifier": p.get("IDENTIFIER"),
             "headline": p.get("HEADLINE"),
             "event": p.get("EVENT"),
-            "severity": (p.get("SEVERITY") or "").lower(),
+            "severity": sev_str,          # original
+            "level": sev_level,           # NEU: numerische Stufe
             "urgency": p.get("URGENCY"),
             "certainty": p.get("CERTAINTY"),
             "description": (p.get("DESCRIPTION") or "").strip(),
@@ -163,11 +181,22 @@ def fetch_dwd_warnings() -> List[Dict[str, Any]]:
 # FILTER & ZEIT
 # =======================
 
-SEVERITY_ORDER = SEVERITY_ORDER  # (keine Änderung)
+def _parse_int_or_empty(v: str) -> Optional[int]:
+    v = v.strip()
+    if not v:
+        return None
+    try:
+        n = int(v)
+        if 1 <= n <= 4:
+            return n
+    except Exception:
+        pass
+    return None
 
 def passes_filters_global(w: Dict[str, Any]) -> bool:
-    if SEVERITY_MIN:
-        if SEVERITY_ORDER.get(w.get("severity") or "", 0) < SEVERITY_ORDER.get(SEVERITY_MIN, 0):
+    min_level = _parse_int_or_empty(SEVERITY_MIN_LEVEL)
+    if min_level is not None:
+        if int(w.get("level", 0)) < min_level:
             return False
     if EVENT_ALLOW:
         ev = (w.get("event") or "").lower()
@@ -180,7 +209,11 @@ def passes_filters_global(w: Dict[str, Any]) -> bool:
     return True
 
 def is_unwetter_for_ric2(w: Dict[str, Any]) -> bool:
-    return SEVERITY_ORDER.get((w.get("severity") or "").lower(), 0) >= SEVERITY_ORDER.get(SEVERITY_THRESHOLD_RIC2, 3)
+    try:
+        level = int(w.get("level", 0))
+    except Exception:
+        level = 0
+    return level >= int(RIC2_THRESHOLD_LEVEL)
 
 def _parse_dt_any(s: Optional[str]) -> Optional[datetime]:
     if not s: return None
@@ -295,8 +328,14 @@ def fetch_warnlagebericht_nrw_cached() -> Optional[str]:
 # PAYLOAD & SEND
 # =======================
 
+def _fmt_title_with_level(event: Optional[str], level: int, prefix: str = "") -> str:
+    evt = event or "Ereignis"
+    lvl = f"Stufe {level}" if level > 0 else "-"
+    return f"{prefix}DWD-Warnung: {evt} ({lvl})"
+
 def build_divera_payload(w: Dict[str, Any], ric: str, group_ids_env: str = "", title_prefix: str = "") -> Dict[str, Any]:
-    title = f"{title_prefix}DWD-Warnung: {w.get('event') or 'Ereignis'} ({w.get('severity') or '-'})"
+    level = int(w.get("level", 0))
+    title = _fmt_title_with_level(w.get("event"), level, prefix=title_prefix)
 
     dt_effective = _fmt_dt(_parse_dt_any(w.get("effective")))
     dt_onset     = _fmt_dt(_parse_dt_any(w.get("onset")))
@@ -325,6 +364,10 @@ def build_divera_payload(w: Dict[str, Any], ric: str, group_ids_env: str = "", t
         if sent_loc:          meta.append(f"Gesendet: {sent_loc} Uhr")
     if w.get("urgency") or w.get("certainty"):
         meta.append(f"Dringlichkeit: {w.get('urgency')}, Sicherheit: {w.get('certainty')}")
+    # Zusatz: englischer Begriff in Klammern für Transparenz
+    sev_str = w.get("severity") or "-"
+    if level > 0:
+        meta.append(f"Warnstufe: {level} ({sev_str})")
     meta.append(f"Quelle: DWD · {w.get('web')}")
     parts.append("\n".join(meta))
 
@@ -362,14 +405,12 @@ def post_to_divera(payload: Dict[str, Any]) -> Dict[str, Any]:
             timeout=(HTTP_TIMEOUT_CONNECT, HTTP_TIMEOUT_READ)
         )
         if r.status_code >= 300:
-            # Body NICHT loggen (Leak-Prävention)
             raise RuntimeError(f"DIVERA API Fehler {r.status_code}")
         try:
             return r.json()
         except Exception:
             return {"status": r.status_code}
     except Exception as e:
-        # URL/Token nicht ausgeben
         raise RuntimeError(f"DIVERA API Fehler: {type(e).__name__}") from None
 
 # =======================
@@ -391,7 +432,7 @@ def main() -> None:
 
         ident = w.get("identifier") or f"{w.get('headline')}|{w.get('sent')}|{w.get('warncellid')}"
 
-        # 1) Infogruppe
+        # 1) Infogruppe – immer
         key_info = f"{ident}|{RIC_INFO}"
         if (key_info not in seen) and (ident not in seen):
             try:
@@ -400,7 +441,7 @@ def main() -> None:
             except Exception as e:
                 print(f"[Fehler] DIVERA-Post (Info): {e}")
 
-        # 2) Einsatzabteilung (Unwetter)
+        # 2) Einsatzabteilung – ab Stufe RIC2_THRESHOLD_LEVEL
         if is_unwetter_for_ric2(w):
             key_einsatz = f"{ident}|{RIC_EINSATZ}"
             if key_einsatz not in seen:
