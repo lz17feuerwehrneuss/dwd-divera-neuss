@@ -1,0 +1,7 @@
+      - name: Restore warnlage cache
+        uses: actions/cache@v4
+        with:
+          path: warnlage_cache.json
+          key: warnlage-cache-${{ github.run_id }}
+          restore-keys: |
+            warnlage-cache-
