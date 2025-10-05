@@ -1,0 +1,55 @@
+name: Alarm-Broadcast (Zentrale -> Untereinheit + Telegram)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # alle 5 Minuten (UTC)
+  workflow_dispatch:        # manueller Start möglich
+
+# Verhindert Überlappungen, falls ein Lauf länger dauert
+concurrency:
+  group: alarm-broadcast
+  cancel-in-progress: false
+
+jobs:
+  alarm:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Cache für Dedupe-Datei (damit Einsätze nicht doppelt gesendet werden)
+      - name: Restore alarm cache
+        id: cache_alarm
+        uses: actions/cache@v4
+        with:
+          path: seen_alarms.json
+          key: alarm-seen-${{ github.run_id }}
+          restore-keys: |
+            alarm-seen-
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests
+
+      - name: Run alarm broadcast
+        env:
+          # Zentrale (LESEN)
+          DIVERA_ACCESSKEY_CENTRAL: ${{ secrets.DIVERA_ACCESSKEY_CENTRAL }}
+          # Untereinheit (SCHREIBEN)
+          DIVERA_ACCESSKEY_SUB: ${{ secrets.DIVERA_ACCESSKEY_SUB }}
+          # Feste RIC der Untereinheit
+          SUB_RIC: "#170002"
+          # Telegram
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          # Optionen
+          NEWS_PRIVATE: "true"
+        run: |
+          python alarm_broadcast.py
