@@ -209,7 +209,7 @@ def run_daily() -> int:
         print("Daily: keine Stunde mit ALLEN Bedingungen → keine Mitteilung.")
         return 0
 
-    title = "🚩 Fire Danger Warning"
+    title = "🚩 Fire Danger Warning (Forecast)"
     text = _fmt_daily_text(model or "auto", info)
     sent = _post_divera(title, text)
     return int(bool(sent))
@@ -270,3 +270,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
