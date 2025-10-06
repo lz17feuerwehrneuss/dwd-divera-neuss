@@ -39,7 +39,7 @@ jobs:
           FIRE_MODE: "acute"
           LAT: "51.15608"
           LON: "6.66705"
-          TMAX_C: "20"
+          TMAX_C: "10"
           RH_MIN: "50"
           WIND_MEAN_KMH: "25"
           WIND_GUST_KMH: "30"
