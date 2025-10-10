@@ -6,6 +6,10 @@ on:
     - cron: "0 6 * * *"   # 06:00 UTC = 07:00 MEZ
   workflow_dispatch:
 
+concurrency:
+  group: fire-daily
+  cancel-in-progress: false
+
 jobs:
   daily:
     runs-on: ubuntu-latest
@@ -14,18 +18,26 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.x"
+
+      - name: Ensure state dir exists
+        run: mkdir -p .state
+
+      - name: Restore state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: fire-state-v1
 
       - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install requests
+        run: python -m pip install --upgrade requests
 
       - name: Run daily forecast check
         env:
           DIVERA_ACCESSKEY_INFO: ${{ secrets.DIVERA_ACCESSKEY_INFO }}
-          FIRE_RIC: "#170001"               # Infogruppe
+          FIRE_RIC: "#170001"
           FIRE_MODE: "daily"
+          STATE_FILE: ".state/fire_state.json"
           LAT: "51.15608"
           LON: "6.66705"
           TMAX_C: "10"
@@ -35,3 +47,9 @@ jobs:
           MODEL_PREF: "icon_d2,icon_eu,gfs"
         run: |
           python fire_danger_watch.py
+
+      - name: Save state cache
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: fire-state-v1
