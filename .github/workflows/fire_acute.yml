@@ -12,6 +12,9 @@ concurrency:
 jobs:
   acute:
     runs-on: ubuntu-latest
+    env:
+      STATE_CACHE_PREFIX: fire-state-v1-
+      STATE_CACHE_KEY: fire-state-v1-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -22,11 +25,13 @@ jobs:
       - name: Ensure state dir exists
         run: mkdir -p .state
 
-      - name: Restore state cache
+      - name: Restore state cache (latest by prefix)
         uses: actions/cache/restore@v4
         with:
           path: .state
-          key: fire-state-v1
+          key: ${{ env.STATE_CACHE_KEY }}
+          restore-keys: |
+            ${{ env.STATE_CACHE_PREFIX }}
 
       - name: Install deps
         run: python -m pip install --upgrade requests
@@ -44,11 +49,10 @@ jobs:
           WIND_MEAN_KMH: "15"
           WIND_GUST_KMH: "20"
           MODEL_PREF: "icon_d2,icon_eu,gfs"
-        run: |
-          python fire_danger_watch.py
+        run: python fire_danger_watch.py
 
-      - name: Save state cache
+      - name: Save updated state cache (unique key)
         uses: actions/cache/save@v4
         with:
           path: .state
-          key: fire-state-v1
+          key: ${{ env.STATE_CACHE_KEY }}
