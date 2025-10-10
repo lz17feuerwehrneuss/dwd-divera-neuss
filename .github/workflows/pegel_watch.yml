@@ -42,6 +42,6 @@ jobs:
           WATER_RIC: "#170001"                                       # Ziel-RIC (privat)
           # Schwellen (anpassbar; HWM 710, 145)
           DUS_THRESHOLD_CM: "200"
-          NEU_THRESHOLD_CM: "80"
+          NEU_THRESHOLD_CM: "70"
         run: |
           python pegel_watch.py
