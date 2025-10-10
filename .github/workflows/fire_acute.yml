@@ -2,7 +2,7 @@ name: Fire Danger Warning (akut)
 
 on:
   schedule:
-    - cron: "*/15 * * * *"  # alle 15 Minuten
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -15,28 +15,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Restore state (dedupe per Stunde)
-        uses: actions/cache@v4
-        with:
-          path: fire_seen.json
-          key: fire-seen-${{ github.run_id }}
-          restore-keys: |
-            fire-seen-
-
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.x"
+
+      - name: Ensure state dir exists
+        run: mkdir -p .state
+
+      - name: Restore state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: fire-state-v1
 
       - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install requests
+        run: python -m pip install --upgrade requests
 
-      - name: Run acute check
+      - name: Run acute check (hysterese)
         env:
           DIVERA_ACCESSKEY_INFO: ${{ secrets.DIVERA_ACCESSKEY_INFO }}
-          FIRE_RIC: "#170001"               # Infogruppe
+          FIRE_RIC: "#170001"
           FIRE_MODE: "acute"
+          STATE_FILE: ".state/fire_state.json"
           LAT: "51.15608"
           LON: "6.66705"
           TMAX_C: "10"
@@ -46,3 +46,9 @@ jobs:
           MODEL_PREF: "icon_d2,icon_eu,gfs"
         run: |
           python fire_danger_watch.py
+
+      - name: Save state cache
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: fire-state-v1
