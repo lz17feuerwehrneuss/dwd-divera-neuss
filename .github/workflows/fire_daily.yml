@@ -2,24 +2,32 @@ name: Fire Danger Warning (täglich 07:00)
 
 on:
   schedule:
-    - cron: "0 5 * * *"   # 05:00 UTC = 07:00 MESZ
-    - cron: "0 6 * * *"   # 06:00 UTC = 07:00 MEZ
+    # 05:00 UTC = 07:00 MESZ
+    - cron: "0 5 * * *"
+    # 06:00 UTC = 07:00 MEZ
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 concurrency:
   group: fire-daily
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   daily:
     runs-on: ubuntu-latest
     env:
+      # Gemeinsamer Prefix für Restore; uniquen Key pro Save
       STATE_CACHE_PREFIX: fire-state-v1-
       STATE_CACHE_KEY: fire-state-v1-${{ github.run_id }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
