@@ -9,16 +9,22 @@ concurrency:
   group: fire-acute
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   acute:
     runs-on: ubuntu-latest
     env:
+      # Gemeinsamer Prefix für Restore; uniquen Key pro Save
       STATE_CACHE_PREFIX: fire-state-v1-
       STATE_CACHE_KEY: fire-state-v1-${{ github.run_id }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
